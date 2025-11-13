@@ -1,0 +1,87 @@
+# name: API CI/CD
+
+# on:
+#   push:
+#     branches: [main]
+#     paths:
+#       - 'backend/api_service/**'
+#       - 'backend/shared/**'
+#       - '.github/workflows/api-ci-cd.yml'
+
+# permissions:
+#   contents: read
+
+# jobs:
+#   deploy:
+#     name: Build, Push & Deploy API
+#     runs-on: ubuntu-latest
+#     env:
+#       AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+#       ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+#       ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY_API }}
+#       IMAGE_SHA_TAG: ${{ github.sha }}
+#       # Update this if your ECS task definition uses a different container name
+#       API_CONTAINER_NAME: api-service
+#       ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
+#       ECS_SERVICE: ${{ secrets.ECS_SERVICE_API }}
+#       ECS_TASK_DEFINITION: ${{ secrets.ECS_TASK_DEFINITION_API }}
+#     steps:
+#       - name: Checkout
+#         uses: actions/checkout@v4
+
+#       - name: Configure AWS credentials
+#         uses: aws-actions/configure-aws-credentials@v4
+#         with:
+#           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+#           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+#           aws-region: ${{ env.AWS_REGION }}
+
+#       - name: Login to Amazon ECR
+#         uses: aws-actions/amazon-ecr-login@v2
+
+#       - name: Build API image
+#         run: |
+#           set -euo pipefail
+#           IMAGE_URI_SHA="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_SHA_TAG}"
+#           IMAGE_URI_LATEST="${ECR_REGISTRY}/${ECR_REPOSITORY}:latest"
+#           docker build \
+#             -f backend/api_service/Dockerfile \
+#             -t "${IMAGE_URI_SHA}" \
+#             -t "${IMAGE_URI_LATEST}" \
+#             backend
+#           echo "IMAGE_URI_SHA=${IMAGE_URI_SHA}" >> "$GITHUB_ENV"
+#           echo "IMAGE_URI_LATEST=${IMAGE_URI_LATEST}" >> "$GITHUB_ENV"
+
+#       - name: Push API image to ECR
+#         run: |
+#           set -euo pipefail
+#           docker push "${IMAGE_URI_SHA}"
+#           docker push "${IMAGE_URI_LATEST}"
+
+#       - name: Register new task definition revision
+#         id: register-task
+#         env:
+#           IMAGE_URI_SHA: ${{ env.IMAGE_URI_SHA }}
+#         run: |
+#           set -euo pipefail
+#           aws ecs describe-task-definition \
+#             --task-definition "${ECS_TASK_DEFINITION}" \
+#             --query 'taskDefinition' > taskdef.json
+#           jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
+#               | .containerDefinitions = (.containerDefinitions | map(if .name == env.API_CONTAINER_NAME then . + {image: env.IMAGE_URI_SHA} else . end))' \
+#               taskdef.json > new-taskdef.json
+#           TASK_DEF_ARN=$(aws ecs register-task-definition \
+#             --cli-input-json file://new-taskdef.json \
+#             --query 'taskDefinition.taskDefinitionArn' \
+#             --output text)
+#           echo "task-def-arn=${TASK_DEF_ARN}" >> "$GITHUB_OUTPUT"
+
+#       - name: Deploy ECS service
+#         run: |
+#           set -euo pipefail
+#           aws ecs update-service \
+#             --cluster "${ECS_CLUSTER}" \
+#             --service "${ECS_SERVICE}" \
+#             --task-definition "${{ steps.register-task.outputs.task-def-arn }}" \
+#             --force-new-deployment \
+#             --region "${AWS_REGION}"

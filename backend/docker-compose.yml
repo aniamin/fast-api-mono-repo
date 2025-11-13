@@ -1,0 +1,111 @@
+services:
+  api-service:
+    container_name: api-service
+    build:
+      context: ./
+      dockerfile: ./api_service/Dockerfile
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+    ports:
+      - "8000:8000"
+    environment:
+      DB_DSN: postgresql+psycopg2://appuser:apppassword@postgres:5432/appdb
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_EVENTS_TOPIC: events-input
+      KAFKA_DLQ_TOPIC: events-dlq
+      KAFKA_GROUP_ID: events-processor
+      KAFKA_SECURITY_PROTOCOL: PLAINTEXT
+      KAFKA_SASL_MECHANISM: ""
+      KAFKA_SASL_USERNAME: ""
+      KAFKA_SASL_PASSWORD: ""
+      JWT_SECRET: local-dev-secret
+      JWT_ALGORITHM: HS256
+    restart: unless-stopped
+
+  worker-service:
+    container_name: worker-service
+    build:
+      context: ./
+      dockerfile: ./worker_service/Dockerfile
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+    environment:
+      DB_DSN: postgresql+psycopg2://appuser:apppassword@postgres:5432/appdb
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_EVENTS_TOPIC: events-input
+      KAFKA_DLQ_TOPIC: events-dlq
+      KAFKA_GROUP_ID: events-processor
+      KAFKA_SECURITY_PROTOCOL: PLAINTEXT
+      KAFKA_SASL_MECHANISM: ""
+      KAFKA_SASL_USERNAME: ""
+      KAFKA_SASL_PASSWORD: ""
+      JWT_SECRET: local-dev-secret
+      JWT_ALGORITHM: HS256
+    restart: unless-stopped
+
+  postgres:
+    container_name: postgres
+    image: postgres:15
+    environment:
+      POSTGRES_DB: appdb
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: apppassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    container_name: redis
+    image: redis:7
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  kafka:
+    container_name: kafka
+    image: bitnamilegacy/kafka:3.6.1-debian-11-r0
+    environment:
+      KAFKA_ENABLE_KRAFT: "yes"
+      KAFKA_CFG_PROCESS_ROLES: broker,controller
+      KAFKA_CFG_NODE_ID: 1
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_LOG_DIRS: /bitnami/kafka/data
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka_data:/bitnami/kafka
+    restart: unless-stopped
+
+  kafka-ui:
+    container_name: kafka-ui
+    image: provectuslabs/kafka-ui:latest
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  kafka_data:
